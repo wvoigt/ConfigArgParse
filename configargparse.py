@@ -386,6 +386,7 @@ class ArgumentParser(argparse.ArgumentParser):
                 (eg. ["-w", "--write-out-config-file"]). Default: []
             write_out_config_file_arg_help_message: The help message to use for
                 the args in args_for_writing_out_config_file.
+            exit_on_write_out: If true, will exit after a write out of a config file.
         """
         # This is the only way to make positional args (tested in the argparse
         # main test suite) and keyword arguments work across both Python 2 and
@@ -408,7 +409,8 @@ class ArgumentParser(argparse.ArgumentParser):
         write_out_config_file_arg_help_message = kwargs.pop(
             'write_out_config_file_arg_help_message', "takes the current "
             "command line args and writes them out to a config file at the "
-            "given path, then exits")
+            "given path, then exits (unless exit_on_write_out is False)")
+        exit_on_write_out = kwargs.pop('exit_on_write_out', True)
 
         self._config_file_open_func = kwargs.pop('config_file_open_func', open)
 
@@ -436,6 +438,7 @@ class ArgumentParser(argparse.ArgumentParser):
                 dest="write_out_config_file_to_this_path",
                 metavar="CONFIG_OUTPUT_PATH",
                 help=write_out_config_file_arg_help_message,
+                exit_on_write_out=exit_on_write_out,
                 is_write_out_config_file_arg=True)
 
     def parse_args(self, args = None, namespace = None,
@@ -612,12 +615,15 @@ class ArgumentParser(argparse.ArgumentParser):
         # parse all args (including commandline, config file, and env var)
         namespace, unknown_args = argparse.ArgumentParser.parse_known_args(
             self, args=args, namespace=namespace)
+        # handle write exit behavior if any args have exit_on_write_out
+        exit_on_write_out = all([getattr(a, "exit_on_write_out", True) for a in self._actions
+                             if getattr(a, "is_write_out_config_file_arg", False)])
         # handle any args that have is_write_out_config_file_arg set to true
         # check if the user specified this arg on the commandline
         output_file_paths = [getattr(namespace, a.dest, None) for a in self._actions
                              if getattr(a, "is_write_out_config_file_arg", False)]
         output_file_paths = [a for a in output_file_paths if a is not None]
-        self.write_config_file(namespace, output_file_paths, exit_after=True)
+        self.write_config_file(namespace, output_file_paths, exit_after=exit_on_write_out)
         return namespace, unknown_args
 
     def write_config_file(self, parsed_namespace, output_file_paths, exit_after=False):
@@ -952,8 +958,11 @@ def add_argument(self, *args, **kwargs):
         is_write_out_config_file_arg: If True, this arg will be treated as a
             config file path, and, when it is specified, will cause
             configargparse to write all current commandline args to this file
-            as config options and then exit.
+            as config options and then exit (if exit_on_write_out is True).
             Default: False
+        exit_on_write_out: If True, exit upon completion of the write out.
+            If False, will write out the config file and then continue normally.
+            Default: True
     """
 
     env_var = kwargs.pop("env_var", None)
@@ -965,12 +974,16 @@ def add_argument(self, *args, **kwargs):
     is_write_out_config_file_arg = kwargs.pop(
         "is_write_out_config_file_arg", None)
 
+    exit_on_write_out = kwargs.pop(
+        "exit_on_write_out", True)
+
     action = self.original_add_argument_method(*args, **kwargs)
 
     action.is_positional_arg = not action.option_strings
     action.env_var = env_var
     action.is_config_file_arg = is_config_file_arg
     action.is_write_out_config_file_arg = is_write_out_config_file_arg
+    action.exit_on_write_out = exit_on_write_out
 
     if action.is_positional_arg and env_var:
         raise ValueError("env_var can't be set for a positional arg.")
